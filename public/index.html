@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barbearia Sistema</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+
+  <header class="topo">
+    <h1>💈 Barbearia Sistema</h1>
+    <p>Controle de vendas, barbeiros e relatórios</p>
+  </header>
+
+  <div class="menu">
+    <button onclick="abrir('vendas')">Vendas</button>
+    <button onclick="abrir('relatorio')">Relatório de Vendas</button>
+    <button onclick="abrir('barbeiros')">Relatório dos Barbeiros</button>
+    <button onclick="dashboard()">Dashboard</button>
+    <button onclick="ranking()">Ranking</button>
+    <button onclick="abrir('admin')">Administrador</button>
+  </div>
+
+  <main id="conteudo" class="conteudo">
+    <div class="card destaque">
+      <h2>Bem-vindo</h2>
+      <p>Escolha uma opção acima para começar.</p>
+    </div>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

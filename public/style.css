@@ -1,0 +1,178 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #111;
+  color: #fff;
+}
+
+.topo {
+  background: linear-gradient(135deg, #000, #222);
+  padding: 24px 16px;
+  text-align: center;
+  border-bottom: 2px solid #d4af37;
+}
+
+.topo h1 {
+  margin: 0;
+  color: #d4af37;
+  font-size: 32px;
+}
+
+.topo p {
+  margin-top: 8px;
+  color: #ddd;
+}
+
+.menu {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+  background: #181818;
+  border-bottom: 1px solid #333;
+}
+
+button {
+  background: #d4af37;
+  color: #111;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 18px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+button:hover {
+  transform: scale(1.03);
+  background: #f0c94d;
+}
+
+.btn-excluir {
+  background: #c0392b;
+  color: #fff;
+}
+
+.btn-excluir:hover {
+  background: #e74c3c;
+}
+
+.conteudo {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.card {
+  background: #1b1b1b;
+  border: 1px solid #333;
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.card h2,
+.card h3 {
+  margin-top: 0;
+  color: #d4af37;
+}
+
+.destaque {
+  border: 1px solid #d4af37;
+}
+
+label {
+  display: block;
+  text-align: left;
+  margin-top: 12px;
+  margin-bottom: 6px;
+  color: #ddd;
+}
+
+select,
+input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #444;
+  background: #101010;
+  color: white;
+  margin-bottom: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.linha-admin {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #121212;
+  border: 1px solid #2a2a2a;
+  padding: 12px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 700px) {
+  .topo h1 {
+    font-size: 26px;
+  }
+
+  .menu {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  button {
+    width: 100%;
+  }
+
+  .linha-admin {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.campo-data {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.campo-data input {
+  flex: 1;
+}
+
+.campo-data button {
+  width: auto;
+  min-width: 52px;
+  padding: 12px;
+}
+
+.campo-data {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.campo-data input {
+  flex: 1;
+  cursor: pointer;
+}
+
+.campo-data button {
+  width: auto;
+  min-width: 52px;
+  padding: 12px;
+}
