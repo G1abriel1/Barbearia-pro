@@ -24,7 +24,7 @@ mongoose
   .then(() => console.log("MongoDB conectado"))
   .catch((err) => console.log("Erro MongoDB:", err));
 
-app.get("/", (req, res) => {
+app.get("/status", (req, res) => {
   res.send("Sistema Barbearia funcionando");
 });
 
