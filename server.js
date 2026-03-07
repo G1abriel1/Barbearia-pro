@@ -452,36 +452,62 @@ app.post("/sales", auth, ownerOuManager, async (req, res) => {
       return res.status(404).json({ error: "Barbeiro não encontrado nessa unidade" });
     }
 
+    const listaServicos = Array.isArray(services) ? services.filter(Boolean) : [];
+
     const serviceDocs = await Service.find({
-      _id: { $in: services },
+      _id: { $in: [...new Set(listaServicos)] },
       shop: shopId,
       ativo: true,
     });
 
-    if (serviceDocs.length !== services.length) {
+    const mapaServicos = new Map(
+      serviceDocs.map((item) => [String(item._id), item])
+    );
+
+    const servicosInvalidos = listaServicos.some(
+      (id) => !mapaServicos.has(String(id))
+    );
+
+    if (servicosInvalidos) {
       return res.status(400).json({ error: "Um ou mais serviços são inválidos" });
     }
 
     const listaProdutos = Array.isArray(products) ? products.filter(Boolean) : [];
 
     const productDocs = await Product.find({
-      _id: { $in: listaProdutos },
+      _id: { $in: [...new Set(listaProdutos)] },
       shop: shopId,
       ativo: true,
     });
 
-    if (productDocs.length !== listaProdutos.length) {
+    const mapaProdutos = new Map(
+      productDocs.map((item) => [String(item._id), item])
+    );
+
+    const produtosInvalidos = listaProdutos.some(
+      (id) => !mapaProdutos.has(String(id))
+    );
+
+    if (produtosInvalidos) {
       return res.status(400).json({ error: "Um ou mais produtos são inválidos" });
     }
 
-    const totalServicos = serviceDocs.reduce((acc, item) => acc + Number(item.preco || 0), 0);
-    const totalProdutos = productDocs.reduce((acc, item) => acc + Number(item.preco || 0), 0);
+    const totalServicos = listaServicos.reduce((acc, id) => {
+      const servico = mapaServicos.get(String(id));
+      return acc + Number(servico?.preco || 0);
+    }, 0);
+
+    const totalProdutos = listaProdutos.reduce((acc, id) => {
+      const produto = mapaProdutos.get(String(id));
+      return acc + Number(produto?.preco || 0);
+    }, 0);
+
     const total = totalServicos + totalProdutos;
 
     const sale = new Sale({
       shop: shopId,
       barber,
-      services,
+      services: listaServicos,
       products: listaProdutos,
       paymentMethod,
       total,
