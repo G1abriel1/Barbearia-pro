@@ -5,15 +5,20 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dns = require("dns");
-
-const app = express();
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const Barber = require("./models/Barber");
 const Service = require("./models/Service");
 const Product = require("./models/Product");
 const Sale = require("./models/Sale");
+const Shop = require("./models/Shop");
+const User = require("./models/User");
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "123456";
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "segredo_padrao_mude_isso";
 
 dns.setDefaultResultOrder("ipv4first");
 dns.setServers(["8.8.8.8", "1.1.1.1"]);
@@ -24,25 +29,147 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
 /* ======================
-   CONEXÃO MONGODB
+   FUNÇÕES AUXILIARES
 ====================== */
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB conectado"))
-  .catch((err) => console.log("❌ Erro MongoDB:", err));
+function normalizarLogin(login) {
+  return String(login || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function gerarToken(user) {
+  return jwt.sign(
+    {
+      id: user._id,
+      login: user.login,
+      papel: user.papel,
+      shop: user.shop || null,
+    },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+async function auth(req, res, next) {
+  try {
+    const header = req.headers.authorization || "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+
+    if (!token) {
+      return res.status(401).json({ error: "Token não enviado" });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const user = await User.findById(decoded.id).populate("shop");
+    if (!user || !user.ativo) {
+      return res.status(401).json({ error: "Usuário inválido" });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "Token inválido" });
+  }
+}
+
+function somenteOwner(req, res, next) {
+  if (req.user?.papel !== "owner") {
+    return res.status(403).json({ error: "Acesso permitido apenas ao dono" });
+  }
+  next();
+}
+
+function ownerOuManager(req, res, next) {
+  if (!req.user || !["owner", "manager"].includes(req.user.papel)) {
+    return res.status(403).json({ error: "Sem permissão" });
+  }
+  next();
+}
+
+function obterShopIdDaRequisicao(req) {
+  if (req.user.papel === "owner") {
+    return req.query.shop || req.body.shop || null;
+  }
+
+  return req.user.shop?._id?.toString() || req.user.shop?.toString() || null;
+}
+
+async function validarEntidadeDaUnidade(Model, id, shopId) {
+  const item = await Model.findOne({ _id: id, shop: shopId });
+  return item;
+}
+
+async function criarDadosIniciais() {
+  const contorno = await Shop.findOneAndUpdate(
+    { nome: "Barbearia Contorno" },
+    { nome: "Barbearia Contorno", ativo: true },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  const graoMogol = await Shop.findOneAndUpdate(
+    { nome: "Barbearia Grão Mogol" },
+    { nome: "Barbearia Grão Mogol", ativo: true },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  async function garantirUsuario({ nome, login, senha, papel, shop }) {
+    const loginNormalizado = normalizarLogin(login);
+    const existente = await User.findOne({ login: loginNormalizado });
+
+    if (existente) return existente;
+
+    const senhaHash = await bcrypt.hash(String(senha), 10);
+
+    const user = new User({
+      nome,
+      login: loginNormalizado,
+      senhaHash,
+      papel,
+      shop: shop || null,
+      ativo: true,
+    });
+
+    await user.save();
+    return user;
+  }
+
+  await garantirUsuario({
+    nome: "Gabriel",
+    login: "gabriel",
+    senha: "34229233",
+    papel: "owner",
+    shop: null,
+  });
+
+  await garantirUsuario({
+    nome: "Acesso Contorno",
+    login: "contorno",
+    senha: "7434",
+    papel: "manager",
+    shop: contorno._id,
+  });
+
+  await garantirUsuario({
+    nome: "Acesso Grão Mogol",
+    login: "grao mogol",
+    senha: "112233",
+    papel: "manager",
+    shop: graoMogol._id,
+  });
+
+  console.log("✅ Dados iniciais conferidos");
+}
 
 /* ======================
-   ROTA INICIAL
+   ROTAS PÚBLICAS
 ====================== */
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
-
-/* ======================
-   STATUS
-====================== */
 
 app.get("/status", (req, res) => {
   res.json({
@@ -52,50 +179,139 @@ app.get("/status", (req, res) => {
   });
 });
 
+app.post("/auth/login", async (req, res) => {
+  try {
+    const login = normalizarLogin(req.body.login);
+    const senha = String(req.body.senha || "");
+
+    if (!login || !senha) {
+      return res.status(400).json({ error: "Login e senha são obrigatórios" });
+    }
+
+    const user = await User.findOne({ login }).populate("shop");
+
+    if (!user || !user.ativo) {
+      return res.status(401).json({ error: "Login ou senha inválidos" });
+    }
+
+    const senhaValida = await bcrypt.compare(senha, user.senhaHash);
+
+    if (!senhaValida) {
+      return res.status(401).json({ error: "Login ou senha inválidos" });
+    }
+
+    const token = gerarToken(user);
+
+    return res.json({
+      token,
+      usuario: {
+        id: user._id,
+        nome: user.nome,
+        login: user.login,
+        papel: user.papel,
+        shop: user.shop
+          ? {
+              id: user.shop._id,
+              nome: user.shop.nome,
+            }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("Erro em /auth/login:", error);
+    return res.status(500).json({ error: "Erro ao fazer login" });
+  }
+});
+
+/* ======================
+   ROTAS PROTEGIDAS
+====================== */
+
+app.get("/auth/me", auth, async (req, res) => {
+  return res.json({
+    usuario: {
+      id: req.user._id,
+      nome: req.user.nome,
+      login: req.user.login,
+      papel: req.user.papel,
+      shop: req.user.shop
+        ? {
+            id: req.user.shop._id,
+            nome: req.user.shop.nome,
+          }
+        : null,
+    },
+  });
+});
+
+app.get("/shops", auth, async (req, res) => {
+  try {
+    if (req.user.papel === "owner") {
+      const shops = await Shop.find({ ativo: true }).sort({ nome: 1 });
+      return res.json(shops);
+    }
+
+    if (!req.user.shop) {
+      return res.json([]);
+    }
+
+    return res.json([req.user.shop]);
+  } catch (error) {
+    console.error("Erro em /shops:", error);
+    return res.status(500).json({ error: "Erro ao buscar barbearias" });
+  }
+});
+
 /* ======================
    BARBEIROS
 ====================== */
 
-app.get("/barbers", async (req, res) => {
+app.get("/barbers", auth, ownerOuManager, async (req, res) => {
   try {
-    const barbers = await Barber.find().sort({ nome: 1 });
-    res.json(Array.isArray(barbers) ? barbers : []);
-  } catch (err) {
-    console.error("Erro em /barbers:", err);
-    res.status(500).json({ error: err.message });
+    const shopId = obterShopIdDaRequisicao(req);
+
+    if (!shopId) {
+      return res.status(400).json({ error: "Barbearia não informada" });
+    }
+
+    const barbers = await Barber.find({ shop: shopId, ativo: true }).sort({ nome: 1 });
+    return res.json(barbers);
+  } catch (error) {
+    console.error("Erro em /barbers:", error);
+    return res.status(500).json({ error: "Erro ao buscar barbeiros" });
   }
 });
 
-app.post("/barbers", async (req, res) => {
+app.post("/barbers", auth, somenteOwner, async (req, res) => {
   try {
-    const { nome, comissao } = req.body;
+    const { nome, comissao, shop } = req.body;
 
-    if (!nome || comissao === undefined || comissao === null) {
-      return res.status(400).json({
-        error: "Nome e comissão são obrigatórios",
-      });
+    if (!nome || comissao === undefined || !shop) {
+      return res.status(400).json({ error: "Nome, comissão e barbearia são obrigatórios" });
     }
 
     const barber = new Barber({
       nome: String(nome).trim(),
       comissao: Number(comissao),
+      shop,
+      ativo: true,
     });
 
     await barber.save();
-    res.json(barber);
-  } catch (err) {
-    console.error("Erro em POST /barbers:", err);
-    res.status(500).json({ error: err.message });
+    return res.json(barber);
+  } catch (error) {
+    console.error("Erro em POST /barbers:", error);
+    return res.status(500).json({ error: "Erro ao cadastrar barbeiro" });
   }
 });
 
-app.delete("/barbers/:id", async (req, res) => {
+app.delete("/barbers/:id", auth, somenteOwner, async (req, res) => {
   try {
-    await Barber.findByIdAndDelete(req.params.id);
-    res.json({ message: "Barbeiro deletado com sucesso" });
-  } catch (err) {
-    console.error("Erro em DELETE /barbers/:id:", err);
-    res.status(500).json({ error: err.message });
+    await Barber.findByIdAndUpdate(req.params.id, { ativo: false });
+    return res.json({ message: "Barbeiro removido com sucesso" });
+  } catch (error) {
+    console.error("Erro em DELETE /barbers/:id:", error);
+    return res.status(500).json({ error: "Erro ao remover barbeiro" });
   }
 });
 
@@ -103,46 +319,52 @@ app.delete("/barbers/:id", async (req, res) => {
    SERVIÇOS
 ====================== */
 
-app.get("/services", async (req, res) => {
+app.get("/services", auth, ownerOuManager, async (req, res) => {
   try {
-    const services = await Service.find().sort({ nome: 1 });
-    res.json(Array.isArray(services) ? services : []);
-  } catch (err) {
-    console.error("Erro em /services:", err);
-    res.status(500).json({ error: err.message });
+    const shopId = obterShopIdDaRequisicao(req);
+
+    if (!shopId) {
+      return res.status(400).json({ error: "Barbearia não informada" });
+    }
+
+    const services = await Service.find({ shop: shopId, ativo: true }).sort({ nome: 1 });
+    return res.json(services);
+  } catch (error) {
+    console.error("Erro em /services:", error);
+    return res.status(500).json({ error: "Erro ao buscar serviços" });
   }
 });
 
-app.post("/services", async (req, res) => {
+app.post("/services", auth, somenteOwner, async (req, res) => {
   try {
-    const { nome, preco } = req.body;
+    const { nome, preco, shop } = req.body;
 
-    if (!nome || preco === undefined || preco === null) {
-      return res.status(400).json({
-        error: "Nome e preço são obrigatórios",
-      });
+    if (!nome || preco === undefined || !shop) {
+      return res.status(400).json({ error: "Nome, preço e barbearia são obrigatórios" });
     }
 
     const service = new Service({
       nome: String(nome).trim(),
       preco: Number(preco),
+      shop,
+      ativo: true,
     });
 
     await service.save();
-    res.json(service);
-  } catch (err) {
-    console.error("Erro em POST /services:", err);
-    res.status(500).json({ error: err.message });
+    return res.json(service);
+  } catch (error) {
+    console.error("Erro em POST /services:", error);
+    return res.status(500).json({ error: "Erro ao cadastrar serviço" });
   }
 });
 
-app.delete("/services/:id", async (req, res) => {
+app.delete("/services/:id", auth, somenteOwner, async (req, res) => {
   try {
-    await Service.findByIdAndDelete(req.params.id);
-    res.json({ message: "Serviço deletado com sucesso" });
-  } catch (err) {
-    console.error("Erro em DELETE /services/:id:", err);
-    res.status(500).json({ error: err.message });
+    await Service.findByIdAndUpdate(req.params.id, { ativo: false });
+    return res.json({ message: "Serviço removido com sucesso" });
+  } catch (error) {
+    console.error("Erro em DELETE /services/:id:", error);
+    return res.status(500).json({ error: "Erro ao remover serviço" });
   }
 });
 
@@ -150,140 +372,196 @@ app.delete("/services/:id", async (req, res) => {
    PRODUTOS
 ====================== */
 
-app.get("/products", async (req, res) => {
+app.get("/products", auth, ownerOuManager, async (req, res) => {
   try {
-    const products = await Product.find().sort({ nome: 1 });
-    res.json(Array.isArray(products) ? products : []);
-  } catch (err) {
-    console.error("Erro em /products:", err);
-    res.status(500).json({ error: err.message });
+    const shopId = obterShopIdDaRequisicao(req);
+
+    if (!shopId) {
+      return res.status(400).json({ error: "Barbearia não informada" });
+    }
+
+    const products = await Product.find({ shop: shopId, ativo: true }).sort({ nome: 1 });
+    return res.json(products);
+  } catch (error) {
+    console.error("Erro em /products:", error);
+    return res.status(500).json({ error: "Erro ao buscar produtos" });
   }
 });
 
-app.post("/products", async (req, res) => {
+app.post("/products", auth, somenteOwner, async (req, res) => {
   try {
-    const { nome, preco } = req.body;
+    const { nome, preco, shop } = req.body;
 
-    if (!nome || preco === undefined || preco === null) {
-      return res.status(400).json({
-        error: "Nome e preço são obrigatórios",
-      });
+    if (!nome || preco === undefined || !shop) {
+      return res.status(400).json({ error: "Nome, preço e barbearia são obrigatórios" });
     }
 
     const product = new Product({
       nome: String(nome).trim(),
       preco: Number(preco),
+      shop,
+      ativo: true,
     });
 
     await product.save();
-    res.json(product);
-  } catch (err) {
-    console.error("Erro em POST /products:", err);
-    res.status(500).json({ error: err.message });
+    return res.json(product);
+  } catch (error) {
+    console.error("Erro em POST /products:", error);
+    return res.status(500).json({ error: "Erro ao cadastrar produto" });
   }
 });
 
-app.delete("/products/:id", async (req, res) => {
+app.delete("/products/:id", auth, somenteOwner, async (req, res) => {
   try {
-    await Product.findByIdAndDelete(req.params.id);
-    res.json({ message: "Produto deletado com sucesso" });
-  } catch (err) {
-    console.error("Erro em DELETE /products/:id:", err);
-    res.status(500).json({ error: err.message });
+    await Product.findByIdAndUpdate(req.params.id, { ativo: false });
+    return res.json({ message: "Produto removido com sucesso" });
+  } catch (error) {
+    console.error("Erro em DELETE /products/:id:", error);
+    return res.status(500).json({ error: "Erro ao remover produto" });
   }
 });
 
 /* ======================
-   REGISTRAR VENDA
+   VENDAS
 ====================== */
 
-app.post("/sales", async (req, res) => {
+app.post("/sales", auth, ownerOuManager, async (req, res) => {
   try {
-    const { barber, service, product, paymentMethod } = req.body;
+    const { barber, services, products, paymentMethod, observacoes, shop } = req.body;
 
-    if (!barber || !service || !paymentMethod) {
-      return res.status(400).json({
-        error: "Barbeiro, serviço e forma de pagamento são obrigatórios",
-      });
+    const shopId = req.user.papel === "owner" ? shop : (req.user.shop?._id || req.user.shop);
+
+    if (!shopId) {
+      return res.status(400).json({ error: "Barbearia não informada" });
     }
 
-    const barberDoc = await Barber.findById(barber);
+    if (!barber) {
+      return res.status(400).json({ error: "Barbeiro é obrigatório" });
+    }
+
+    if (!Array.isArray(services) || services.length === 0) {
+      return res.status(400).json({ error: "Selecione pelo menos um serviço" });
+    }
+
+    if (!paymentMethod) {
+      return res.status(400).json({ error: "Forma de pagamento é obrigatória" });
+    }
+
+    const barberDoc = await validarEntidadeDaUnidade(Barber, barber, shopId);
     if (!barberDoc) {
-      return res.status(404).json({ error: "Barbeiro não encontrado" });
+      return res.status(404).json({ error: "Barbeiro não encontrado nessa unidade" });
     }
 
-    const serviceDoc = await Service.findById(service);
-    if (!serviceDoc) {
-      return res.status(404).json({ error: "Serviço não encontrado" });
+    const serviceDocs = await Service.find({
+      _id: { $in: services },
+      shop: shopId,
+      ativo: true,
+    });
+
+    if (serviceDocs.length !== services.length) {
+      return res.status(400).json({ error: "Um ou mais serviços são inválidos" });
     }
 
-    let products = [];
-    let total = Number(serviceDoc.preco) || 0;
+    const listaProdutos = Array.isArray(products) ? products.filter(Boolean) : [];
 
-    if (product) {
-      const productDoc = await Product.findById(product);
-      if (productDoc) {
-        products.push(productDoc._id);
-        total += Number(productDoc.preco) || 0;
-      }
+    const productDocs = await Product.find({
+      _id: { $in: listaProdutos },
+      shop: shopId,
+      ativo: true,
+    });
+
+    if (productDocs.length !== listaProdutos.length) {
+      return res.status(400).json({ error: "Um ou mais produtos são inválidos" });
     }
+
+    const totalServicos = serviceDocs.reduce((acc, item) => acc + Number(item.preco || 0), 0);
+    const totalProdutos = productDocs.reduce((acc, item) => acc + Number(item.preco || 0), 0);
+    const total = totalServicos + totalProdutos;
 
     const sale = new Sale({
+      shop: shopId,
       barber,
-      services: [service],
-      products,
+      services,
+      products: listaProdutos,
       paymentMethod,
       total,
+      criadoPor: req.user._id,
+      observacoes: observacoes || "",
       date: new Date(),
     });
 
     await sale.save();
 
-    const savedSale = await Sale.findById(sale._id)
+    const vendaSalva = await Sale.findById(sale._id)
+      .populate("shop")
       .populate("barber")
       .populate("services")
-      .populate("products");
+      .populate("products")
+      .populate("criadoPor");
 
-    res.json(savedSale);
-  } catch (err) {
-    console.error("Erro em POST /sales:", err);
-    res.status(500).json({ error: err.message });
+    return res.json(vendaSalva);
+  } catch (error) {
+    console.error("Erro em POST /sales:", error);
+    return res.status(500).json({ error: "Erro ao registrar venda" });
   }
 });
 
-/* ======================
-   LISTAR VENDAS
-====================== */
-
-app.get("/sales", async (req, res) => {
+app.get("/sales", auth, ownerOuManager, async (req, res) => {
   try {
-    const { barber, date } = req.query;
-    const filtro = {};
+    const { date, startDate, endDate, barber } = req.query;
+    const shopId = obterShopIdDaRequisicao(req);
+
+    if (!shopId) {
+      return res.status(400).json({ error: "Barbearia não informada" });
+    }
+
+    const filtro = { shop: shopId };
 
     if (barber) {
       filtro.barber = barber;
     }
 
     if (date) {
-      const inicio = new Date(`${date}T00:00:00`);
-      const fim = new Date(`${date}T23:59:59.999`);
-
       filtro.date = {
-        $gte: inicio,
-        $lte: fim,
+        $gte: new Date(`${date}T00:00:00`),
+        $lte: new Date(`${date}T23:59:59.999`),
+      };
+    }
+
+    if (startDate || endDate) {
+      filtro.date = {
+        $gte: startDate ? new Date(`${startDate}T00:00:00`) : new Date("2000-01-01T00:00:00"),
+        $lte: endDate ? new Date(`${endDate}T23:59:59.999`) : new Date(),
       };
     }
 
     const sales = await Sale.find(filtro)
+      .populate("shop")
       .populate("barber")
       .populate("services")
       .populate("products")
+      .populate("criadoPor")
       .sort({ date: -1 });
 
-    res.json(Array.isArray(sales) ? sales : []);
-  } catch (err) {
-    console.error("Erro em GET /sales:", err);
-    res.status(500).json({ error: err.message });
+    return res.json(sales);
+  } catch (error) {
+    console.error("Erro em GET /sales:", error);
+    return res.status(500).json({ error: "Erro ao buscar vendas" });
+  }
+});
+
+app.delete("/sales/:id", auth, somenteOwner, async (req, res) => {
+  try {
+    const sale = await Sale.findByIdAndDelete(req.params.id);
+
+    if (!sale) {
+      return res.status(404).json({ error: "Venda não encontrada" });
+    }
+
+    return res.json({ message: "Venda apagada com sucesso" });
+  } catch (error) {
+    console.error("Erro em DELETE /sales/:id:", error);
+    return res.status(500).json({ error: "Erro ao apagar venda" });
   }
 });
 
@@ -291,31 +569,28 @@ app.get("/sales", async (req, res) => {
    RELATÓRIO DE VENDAS
 ====================== */
 
-app.get("/relatorio", async (req, res) => {
+app.get("/relatorio", auth, ownerOuManager, async (req, res) => {
   try {
     const { barber, startDate, endDate } = req.query;
-    const filtro = {};
+    const shopId = obterShopIdDaRequisicao(req);
+
+    if (!shopId) {
+      return res.status(400).json({ error: "Barbearia não informada" });
+    }
+
+    const filtro = { shop: shopId };
 
     if (barber) {
       filtro.barber = barber;
     }
 
-    if (startDate || endDate) {
-      const inicio = startDate
-        ? new Date(`${startDate}T00:00:00`)
-        : new Date("2000-01-01T00:00:00");
-
-      const fim = endDate
-        ? new Date(`${endDate}T23:59:59.999`)
-        : new Date();
-
-      filtro.date = {
-        $gte: inicio,
-        $lte: fim,
-      };
-    }
+    filtro.date = {
+      $gte: startDate ? new Date(`${startDate}T00:00:00`) : new Date("2000-01-01T00:00:00"),
+      $lte: endDate ? new Date(`${endDate}T23:59:59.999`) : new Date(),
+    };
 
     const sales = await Sale.find(filtro)
+      .populate("shop")
       .populate("barber")
       .populate("services")
       .populate("products")
@@ -323,28 +598,25 @@ app.get("/relatorio", async (req, res) => {
 
     let total = 0;
 
-    const vendas = (sales || []).map((sale) => {
-      const valor = Number(sale.total || 0);
-      total += valor;
+    const vendas = sales.map((sale) => {
+      total += Number(sale.total || 0);
 
       return {
         id: sale._id,
+        unidade: sale.shop?.nome || "",
         barbeiro: sale.barber?.nome || "Sem barbeiro",
-        servico: sale.services?.[0]?.nome || "Sem serviço",
-        produto: sale.products?.[0]?.nome || "",
-        valor,
+        servicos: Array.isArray(sale.services) ? sale.services.map((s) => s.nome) : [],
+        produtos: Array.isArray(sale.products) ? sale.products.map((p) => p.nome) : [],
+        valor: Number(sale.total || 0),
         pagamento: sale.paymentMethod || "",
         data: sale.date,
       };
     });
 
-    res.json({
-      total,
-      vendas,
-    });
-  } catch (err) {
-    console.error("Erro em GET /relatorio:", err);
-    res.status(500).json({ error: err.message });
+    return res.json({ total, vendas });
+  } catch (error) {
+    console.error("Erro em GET /relatorio:", error);
+    return res.status(500).json({ error: "Erro ao gerar relatório" });
   }
 });
 
@@ -352,87 +624,161 @@ app.get("/relatorio", async (req, res) => {
    RELATÓRIO DOS BARBEIROS
 ====================== */
 
-app.get("/relatorio-barbeiros", async (req, res) => {
+app.get("/relatorio-barbeiros", auth, somenteOwner, async (req, res) => {
+
   try {
-    const { barber, startDate, endDate } = req.query;
-    const filtro = {};
+
+    const { barber, startDate, endDate, shop } = req.query;
+
+    if (!shop) {
+      return res.status(400).json({ error: "Selecione a barbearia" });
+    }
+
+    const filtro = { shop };
 
     if (barber) {
       filtro.barber = barber;
     }
 
-    if (startDate || endDate) {
-      const inicio = startDate
-        ? new Date(`${startDate}T00:00:00`)
-        : new Date("2000-01-01T00:00:00");
-
-      const fim = endDate
-        ? new Date(`${endDate}T23:59:59.999`)
-        : new Date();
-
-      filtro.date = {
-        $gte: inicio,
-        $lte: fim,
-      };
-    }
+    filtro.date = {
+      $gte: startDate ? new Date(`${startDate}T00:00:00`) : new Date("2000-01-01"),
+      $lte: endDate ? new Date(`${endDate}T23:59:59.999`) : new Date(),
+    };
 
     const sales = await Sale.find(filtro)
       .populate("barber")
       .populate("services")
-      .populate("products")
-      .sort({ date: -1 });
+      .populate("products");
 
-    const resultado = {};
+    let totalPeriodo = 0;
+    let comissaoPeriodo = 0;
+    let produtosVendidos = 0;
 
-    (sales || []).forEach((sale) => {
-      if (!sale.barber) return;
+    const barbeiros = {};
+    const dias = {};
 
-      const id = sale.barber._id.toString();
+    for (const sale of sales) {
 
-      if (!resultado[id]) {
-        resultado[id] = {
-          barbeiro: sale.barber.nome || "Sem nome",
-          servicos: 0,
-          faturamento: 0,
-          comissao: 0,
-          produtos: 0,
+      if (!sale.barber) continue;
+
+      const nomeBarbeiro = sale.barber.nome;
+      const data = new Date(sale.date).toISOString().slice(0,10);
+
+      if (!barbeiros[nomeBarbeiro]) {
+        barbeiros[nomeBarbeiro] = {
+          barbeiro: nomeBarbeiro,
+          totalPeriodo: 0,
+          comissaoPeriodo: 0,
+          produtosVendidos: 0,
+          servicosDetalhados: {}
         };
       }
 
-      const listaServicos = Array.isArray(sale.services) ? sale.services : [];
-      const listaProdutos = Array.isArray(sale.products) ? sale.products : [];
+      if (!dias[data]) {
+        dias[data] = {
+          data,
+          totalDia: 0,
+          comissaoDia: 0,
+          produtosVendidos: 0,
+          servicosDetalhados: {}
+        };
+      }
 
-      listaServicos.forEach((service) => {
-        const valorServico = Number(service?.preco || 0);
+      const services = sale.services || [];
+      const products = sale.products || [];
 
-        resultado[id].servicos += 1;
-        resultado[id].faturamento += valorServico;
-        resultado[id].comissao +=
-          valorServico * ((Number(sale.barber.comissao) || 0) / 100);
-      });
+      for (const service of services) {
 
-      resultado[id].produtos += listaProdutos.length;
+        const nome = service.nome;
+        const preco = Number(service.preco || 0);
+        const comissao = preco * (Number(sale.barber.comissao || 0) / 100);
+
+        totalPeriodo += preco;
+        comissaoPeriodo += comissao;
+
+        barbeiros[nomeBarbeiro].totalPeriodo += preco;
+        barbeiros[nomeBarbeiro].comissaoPeriodo += comissao;
+
+        dias[data].totalDia += preco;
+        dias[data].comissaoDia += comissao;
+
+        if (!barbeiros[nomeBarbeiro].servicosDetalhados[nome])
+          barbeiros[nomeBarbeiro].servicosDetalhados[nome] = 0;
+
+        barbeiros[nomeBarbeiro].servicosDetalhados[nome]++;
+
+        if (!dias[data].servicosDetalhados[nome])
+          dias[data].servicosDetalhados[nome] = 0;
+
+        dias[data].servicosDetalhados[nome]++;
+      }
+
+      barbeiros[nomeBarbeiro].produtosVendidos += products.length;
+      dias[data].produtosVendidos += products.length;
+      produtosVendidos += products.length;
+
+    }
+
+        const barbeirosFormatados = Object.values(barbeiros).map((b) => ({
+      ...b,
+      servicosDetalhados: Object.entries(b.servicosDetalhados).map(([nome, quantidade]) => ({
+        nome,
+        quantidade,
+      })),
+    }));
+
+    const diasFormatados = Object.values(dias).map((d) => ({
+      ...d,
+      servicosDetalhados: Object.entries(d.servicosDetalhados).map(([nome, quantidade]) => ({
+        nome,
+        quantidade,
+      })),
+    }));
+
+    res.json({
+      totalPeriodo,
+      comissaoPeriodo,
+      produtosVendidos,
+      barbeiros: barbeirosFormatados,
+      dias: diasFormatados
     });
 
-    res.json(Object.values(resultado));
-  } catch (err) {
-    console.error("Erro em GET /relatorio-barbeiros:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+
+    console.error(error);
+    res.status(500).json({ error: "Erro no relatório dos barbeiros" });
+
   }
+
 });
 
 /* ======================
-   DASHBOARD DO DIA
+   DASHBOARD
 ====================== */
 
-app.get("/daily-report", async (req, res) => {
+app.get("/daily-report", auth, ownerOuManager, async (req, res) => {
   try {
-    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const { date, startDate, endDate } = req.query;
+    const shopId = obterShopIdDaRequisicao(req);
 
-    const inicio = new Date(`${date}T00:00:00`);
-    const fim = new Date(`${date}T23:59:59.999`);
+    if (!shopId) {
+      return res.status(400).json({ error: "Barbearia não informada" });
+    }
+
+    let inicio;
+    let fim;
+
+    if (startDate || endDate) {
+      inicio = startDate ? new Date(`${startDate}T00:00:00`) : new Date("2000-01-01T00:00:00");
+      fim = endDate ? new Date(`${endDate}T23:59:59.999`) : new Date();
+    } else {
+      const dataBase = date || new Date().toISOString().slice(0, 10);
+      inicio = new Date(`${dataBase}T00:00:00`);
+      fim = new Date(`${dataBase}T23:59:59.999`);
+    }
 
     const sales = await Sale.find({
+      shop: shopId,
       date: {
         $gte: inicio,
         $lte: fim,
@@ -447,9 +793,10 @@ app.get("/daily-report", async (req, res) => {
     let totalProdutos = 0;
     let pix = 0;
     let dinheiro = 0;
-    let cartao = 0;
+    let debito = 0;
+    let credito = 0;
 
-    (sales || []).forEach((sale) => {
+    for (const sale of sales) {
       const valor = Number(sale.total || 0);
       const listaServicos = Array.isArray(sale.services) ? sale.services : [];
       const listaProdutos = Array.isArray(sale.products) ? sale.products : [];
@@ -461,22 +808,25 @@ app.get("/daily-report", async (req, res) => {
 
       if (sale.paymentMethod === "PIX") pix += valor;
       if (sale.paymentMethod === "DINHEIRO") dinheiro += valor;
-      if (sale.paymentMethod === "CARTAO") cartao += valor;
-    });
+      if (sale.paymentMethod === "DEBITO") debito += valor;
+      if (sale.paymentMethod === "CREDITO") credito += valor;
+    }
 
-    res.json({
+    return res.json({
       total,
       quantidadeVendas,
       totalServicos,
       totalProdutos,
       pix,
       dinheiro,
-      cartao,
-      data: date,
+      debito,
+      credito,
+      inicio,
+      fim,
     });
-  } catch (err) {
-    console.error("Erro em GET /daily-report:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error("Erro em GET /daily-report:", error);
+    return res.status(500).json({ error: "Erro ao gerar dashboard" });
   }
 });
 
@@ -484,14 +834,29 @@ app.get("/daily-report", async (req, res) => {
    RANKING
 ====================== */
 
-app.get("/ranking", async (req, res) => {
+app.get("/ranking", auth, ownerOuManager, async (req, res) => {
   try {
-    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const { date, startDate, endDate } = req.query;
+    const shopId = obterShopIdDaRequisicao(req);
 
-    const inicio = new Date(`${date}T00:00:00`);
-    const fim = new Date(`${date}T23:59:59.999`);
+    if (!shopId) {
+      return res.status(400).json({ error: "Barbearia não informada" });
+    }
+
+    let inicio;
+    let fim;
+
+    if (startDate || endDate) {
+      inicio = startDate ? new Date(`${startDate}T00:00:00`) : new Date("2000-01-01T00:00:00");
+      fim = endDate ? new Date(`${endDate}T23:59:59.999`) : new Date();
+    } else {
+      const dataBase = date || new Date().toISOString().slice(0, 10);
+      inicio = new Date(`${dataBase}T00:00:00`);
+      fim = new Date(`${dataBase}T23:59:59.999`);
+    }
 
     const sales = await Sale.find({
+      shop: shopId,
       date: {
         $gte: inicio,
         $lte: fim,
@@ -500,8 +865,8 @@ app.get("/ranking", async (req, res) => {
 
     const ranking = {};
 
-    (sales || []).forEach((sale) => {
-      if (!sale.barber) return;
+    for (const sale of sales) {
+      if (!sale.barber) continue;
 
       const nome = sale.barber.nome || "Sem barbeiro";
 
@@ -510,50 +875,37 @@ app.get("/ranking", async (req, res) => {
       }
 
       ranking[nome] += Number(sale.total || 0);
-    });
+    }
 
     const lista = Object.entries(ranking)
       .map(([nome, total]) => ({ nome, total }))
       .sort((a, b) => b.total - a.total);
 
-    res.json(lista);
-  } catch (err) {
-    console.error("Erro em GET /ranking:", err);
-    res.status(500).json({ error: err.message });
+    return res.json(lista);
+  } catch (error) {
+    console.error("Erro em GET /ranking:", error);
+    return res.status(500).json({ error: "Erro ao gerar ranking" });
   }
 });
 
 /* ======================
-   APAGAR VENDA COM SENHA
+   INICIAR SERVIDOR
 ====================== */
 
-app.delete("/sales/:id", async (req, res) => {
+async function startServer() {
   try {
-    const { password } = req.body;
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("✅ MongoDB conectado");
 
-    if (password !== ADMIN_PASSWORD) {
-      return res.status(401).json({ error: "Senha inválida" });
-    }
+    await criarDadosIniciais();
 
-    const sale = await Sale.findByIdAndDelete(req.params.id);
-
-    if (!sale) {
-      return res.status(404).json({ error: "Venda não encontrada" });
-    }
-
-    res.json({ message: "Venda apagada com sucesso" });
-  } catch (err) {
-    console.error("Erro em DELETE /sales/:id:", err);
-    res.status(500).json({ error: err.message });
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Servidor rodando na porta ${PORT}`);
+    });
+  } catch (error) {
+    console.error("❌ Erro ao iniciar servidor:", error);
+    process.exit(1);
   }
-});
+}
 
-/* ======================
-   SERVIDOR
-====================== */
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
+startServer();
