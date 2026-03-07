@@ -1,4 +1,5 @@
 console.log("SCRIPT CARREGADO");
+
 function abrir(pagina) {
   if (pagina === "vendas") carregarVendas();
   if (pagina === "relatorio") carregarRelatorio();
@@ -7,6 +8,7 @@ function abrir(pagina) {
 }
 
 function formatarData(data) {
+  if (!data) return "-";
   return new Date(data).toLocaleString("pt-BR");
 }
 
@@ -26,19 +28,41 @@ function abrirCalendario(id) {
   }
 }
 
+async function fetchJson(url, options = {}) {
+  try {
+    const res = await fetch(url, options);
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error(`Erro em ${url}:`, data);
+      return { error: data.error || "Erro na requisição" };
+    }
+
+    return data;
+  } catch (error) {
+    console.error(`Erro de conexão em ${url}:`, error);
+    return { error: "Erro de conexão com o servidor" };
+  }
+}
+
 /* =========================
    VENDAS
 ========================= */
 
 async function carregarVendas() {
-  const resBarbers = await fetch("/barbers");
-  const barbers = await resBarbers.json();
+  const barbers = await fetchJson("/barbers");
+  const services = await fetchJson("/services");
+  const products = await fetchJson("/products");
 
-  const resServices = await fetch("/services");
-  const services = await resServices.json();
-
-  const resProducts = await fetch("/products");
-  const products = await resProducts.json();
+  if (!Array.isArray(barbers) || !Array.isArray(services) || !Array.isArray(products)) {
+    document.getElementById("conteudo").innerHTML = `
+      <div class="card">
+        <h2>Erro ao carregar vendas</h2>
+        <p>Não foi possível buscar barbeiros, serviços ou produtos.</p>
+      </div>
+    `;
+    return;
+  }
 
   let html = `
     <div class="card">
@@ -60,7 +84,7 @@ async function carregarVendas() {
   `;
 
   services.forEach((s) => {
-    html += `<option value="${s._id}">${s.nome} - R$ ${s.preco}</option>`;
+    html += `<option value="${s._id}">${s.nome} - R$ ${Number(s.preco || 0).toFixed(2)}</option>`;
   });
 
   html += `
@@ -72,7 +96,7 @@ async function carregarVendas() {
   `;
 
   products.forEach((p) => {
-    html += `<option value="${p._id}">${p.nome} - R$ ${p.preco}</option>`;
+    html += `<option value="${p._id}">${p.nome} - R$ ${Number(p.preco || 0).toFixed(2)}</option>`;
   });
 
   html += `
@@ -93,10 +117,10 @@ async function carregarVendas() {
 }
 
 async function salvarVenda() {
-  const barber = document.getElementById("barber").value;
-  const service = document.getElementById("service").value;
-  const product = document.getElementById("product").value;
-  const paymentMethod = document.getElementById("pagamento").value;
+  const barber = document.getElementById("barber")?.value;
+  const service = document.getElementById("service")?.value;
+  const product = document.getElementById("product")?.value;
+  const paymentMethod = document.getElementById("pagamento")?.value;
 
   const body = {
     barber,
@@ -108,7 +132,7 @@ async function salvarVenda() {
     body.product = product;
   }
 
-  const res = await fetch("/sales", {
+  const data = await fetchJson("/sales", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -116,9 +140,7 @@ async function salvarVenda() {
     body: JSON.stringify(body),
   });
 
-  const data = await res.json();
-
-  if (!res.ok || data.error) {
+  if (data.error) {
     alert(data.error || "Erro ao registrar venda");
     return;
   }
@@ -132,8 +154,17 @@ async function salvarVenda() {
 ========================= */
 
 async function carregarRelatorio() {
-  const resBarbers = await fetch("/barbers");
-  const barbers = await resBarbers.json();
+  const barbers = await fetchJson("/barbers");
+
+  if (!Array.isArray(barbers)) {
+    document.getElementById("conteudo").innerHTML = `
+      <div class="card">
+        <h2>Erro ao carregar relatório</h2>
+        <p>Não foi possível buscar os barbeiros.</p>
+      </div>
+    `;
+    return;
+  }
 
   const hoje = new Date().toISOString().slice(0, 10);
 
@@ -177,9 +208,9 @@ async function carregarRelatorio() {
 }
 
 async function buscarRelatorioVendas() {
-  const startDate = document.getElementById("filtroDataInicio").value;
-  const endDate = document.getElementById("filtroDataFim").value;
-  const barber = document.getElementById("filtroBarber").value;
+  const startDate = document.getElementById("filtroDataInicio")?.value;
+  const endDate = document.getElementById("filtroDataFim")?.value;
+  const barber = document.getElementById("filtroBarber")?.value;
 
   let url = "/relatorio";
   const params = [];
@@ -192,17 +223,25 @@ async function buscarRelatorioVendas() {
     url += "?" + params.join("&");
   }
 
-  const res = await fetch(url);
-  const dados = await res.json();
+  const dados = await fetchJson(url);
+
+  if (dados.error) {
+    document.getElementById("resultadoRelatorio").innerHTML = `
+      <div class="card">
+        <p>Erro ao buscar relatório: ${dados.error}</p>
+      </div>
+    `;
+    return;
+  }
 
   let html = `
     <div class="card destaque">
       <h2>Resultado do Relatório</h2>
-      <p><strong>Total:</strong> R$ ${dados.total || 0}</p>
+      <p><strong>Total:</strong> R$ ${Number(dados.total || 0).toFixed(2)}</p>
     </div>
   `;
 
-  if (!dados.vendas || dados.vendas.length === 0) {
+  if (!Array.isArray(dados.vendas) || dados.vendas.length === 0) {
     html += `
       <div class="card">
         <p>Nenhuma venda encontrada nesse filtro.</p>
@@ -215,7 +254,7 @@ async function buscarRelatorioVendas() {
           <h3>${v.barbeiro}</h3>
           <p><strong>Serviço:</strong> ${v.servico}</p>
           <p><strong>Produto:</strong> ${v.produto || "Nenhum"}</p>
-          <p><strong>Valor:</strong> R$ ${v.valor}</p>
+          <p><strong>Valor:</strong> R$ ${Number(v.valor || 0).toFixed(2)}</p>
           <p><strong>Pagamento:</strong> ${v.pagamento}</p>
           <p><strong>Data e hora:</strong> ${formatarData(v.data)}</p>
           <button class="btn-excluir" onclick="apagarVenda('${v.id}')">Apagar</button>
@@ -229,10 +268,9 @@ async function buscarRelatorioVendas() {
 
 async function apagarVenda(id) {
   const password = prompt("Digite a senha para apagar esta venda:");
-
   if (!password) return;
 
-  const res = await fetch(`/sales/${id}`, {
+  const data = await fetchJson(`/sales/${id}`, {
     method: "DELETE",
     headers: {
       "Content-Type": "application/json",
@@ -240,9 +278,7 @@ async function apagarVenda(id) {
     body: JSON.stringify({ password }),
   });
 
-  const data = await res.json();
-
-  if (!res.ok) {
+  if (data.error) {
     alert(data.error || "Erro ao apagar venda");
     return;
   }
@@ -256,8 +292,17 @@ async function apagarVenda(id) {
 ========================= */
 
 async function carregarRelatorioBarbeiros() {
-  const resBarbers = await fetch("/barbers");
-  const barbers = await resBarbers.json();
+  const barbers = await fetchJson("/barbers");
+
+  if (!Array.isArray(barbers)) {
+    document.getElementById("conteudo").innerHTML = `
+      <div class="card">
+        <h2>Erro ao carregar relatório dos barbeiros</h2>
+        <p>Não foi possível buscar os barbeiros.</p>
+      </div>
+    `;
+    return;
+  }
 
   const hoje = new Date().toISOString().slice(0, 10);
 
@@ -300,10 +345,11 @@ async function carregarRelatorioBarbeiros() {
 
   await buscarRelatorioBarbeiros();
 }
+
 async function buscarRelatorioBarbeiros() {
-  const startDate = document.getElementById("filtroDataInicioBarbeiros").value;
-  const endDate = document.getElementById("filtroDataFimBarbeiros").value;
-  const barber = document.getElementById("filtroBarbeiroRelatorio").value;
+  const startDate = document.getElementById("filtroDataInicioBarbeiros")?.value;
+  const endDate = document.getElementById("filtroDataFimBarbeiros")?.value;
+  const barber = document.getElementById("filtroBarbeiroRelatorio")?.value;
 
   let url = "/relatorio-barbeiros";
   const params = [];
@@ -316,8 +362,16 @@ async function buscarRelatorioBarbeiros() {
     url += "?" + params.join("&");
   }
 
-  const res = await fetch(url);
-  const dados = await res.json();
+  const dados = await fetchJson(url);
+
+  if (dados.error) {
+    document.getElementById("resultadoRelatorioBarbeiros").innerHTML = `
+      <div class="card">
+        <p>Erro ao buscar relatório: ${dados.error}</p>
+      </div>
+    `;
+    return;
+  }
 
   let html = `
     <div class="card destaque">
@@ -325,7 +379,7 @@ async function buscarRelatorioBarbeiros() {
     </div>
   `;
 
-  if (!dados || dados.length === 0) {
+  if (!Array.isArray(dados) || dados.length === 0) {
     html += `
       <div class="card">
         <p>Nenhum registro encontrado.</p>
@@ -337,8 +391,8 @@ async function buscarRelatorioBarbeiros() {
         <div class="card">
           <h3>${b.barbeiro}</h3>
           <p><strong>Serviços:</strong> ${b.servicos}</p>
-          <p><strong>Faturamento:</strong> R$ ${b.faturamento}</p>
-          <p><strong>Comissão:</strong> R$ ${b.comissao}</p>
+          <p><strong>Faturamento:</strong> R$ ${Number(b.faturamento || 0).toFixed(2)}</p>
+          <p><strong>Comissão:</strong> R$ ${Number(b.comissao || 0).toFixed(2)}</p>
           <p><strong>Produtos vendidos:</strong> ${b.produtos}</p>
         </div>
       `;
@@ -349,7 +403,7 @@ async function buscarRelatorioBarbeiros() {
 }
 
 function gerarPdfRelatorioBarbeiros() {
-  const conteudo = document.getElementById("resultadoRelatorioBarbeiros").innerHTML;
+  const conteudo = document.getElementById("resultadoRelatorioBarbeiros")?.innerHTML;
 
   if (!conteudo || conteudo.trim() === "") {
     alert("Primeiro gere o relatório antes de exportar para PDF.");
@@ -369,23 +423,19 @@ function gerarPdfRelatorioBarbeiros() {
             color: #000;
             background: #fff;
           }
-
           h1 {
             text-align: center;
             margin-bottom: 20px;
           }
-
           .card {
             border: 1px solid #ccc;
             border-radius: 10px;
             padding: 15px;
             margin-bottom: 15px;
           }
-
           .card h3 {
             margin-top: 0;
           }
-
           button {
             display: none;
           }
@@ -403,53 +453,59 @@ function gerarPdfRelatorioBarbeiros() {
   janela.print();
 }
 
-
-
 /* =========================
    DASHBOARD
 ========================= */
 
 async function dashboard() {
   const hoje = new Date().toISOString().slice(0, 10);
+  const dados = await fetchJson(`/daily-report?date=${hoje}`);
 
-  const res = await fetch(`/daily-report?date=${hoje}`);
-  const dados = await res.json();
+  if (dados.error) {
+    document.getElementById("conteudo").innerHTML = `
+      <div class="card">
+        <h2>Erro no dashboard</h2>
+        <p>${dados.error}</p>
+      </div>
+    `;
+    return;
+  }
 
   let html = `
     <div class="grid">
       <div class="card destaque">
         <h2>Faturamento do Dia</h2>
-        <p>R$ ${dados.total}</p>
+        <p>R$ ${Number(dados.total || 0).toFixed(2)}</p>
       </div>
 
       <div class="card">
         <h2>Vendas</h2>
-        <p>${dados.quantidadeVendas}</p>
+        <p>${dados.quantidadeVendas || 0}</p>
       </div>
 
       <div class="card">
         <h2>Serviços</h2>
-        <p>${dados.totalServicos}</p>
+        <p>${dados.totalServicos || 0}</p>
       </div>
 
       <div class="card">
         <h2>Produtos</h2>
-        <p>${dados.totalProdutos}</p>
+        <p>${dados.totalProdutos || 0}</p>
       </div>
 
       <div class="card">
         <h2>PIX</h2>
-        <p>R$ ${dados.pix}</p>
+        <p>R$ ${Number(dados.pix || 0).toFixed(2)}</p>
       </div>
 
       <div class="card">
         <h2>Dinheiro</h2>
-        <p>R$ ${dados.dinheiro}</p>
+        <p>R$ ${Number(dados.dinheiro || 0).toFixed(2)}</p>
       </div>
 
       <div class="card">
         <h2>Cartão</h2>
-        <p>R$ ${dados.cartao}</p>
+        <p>R$ ${Number(dados.cartao || 0).toFixed(2)}</p>
       </div>
     </div>
   `;
@@ -463,9 +519,17 @@ async function dashboard() {
 
 async function ranking() {
   const hoje = new Date().toISOString().slice(0, 10);
+  const dados = await fetchJson(`/ranking?date=${hoje}`);
 
-  const res = await fetch(`/ranking?date=${hoje}`);
-  const dados = await res.json();
+  if (!Array.isArray(dados)) {
+    document.getElementById("conteudo").innerHTML = `
+      <div class="card">
+        <h2>Erro no ranking</h2>
+        <p>Não foi possível carregar os dados.</p>
+      </div>
+    `;
+    return;
+  }
 
   let html = `
     <div class="card destaque">
@@ -474,7 +538,7 @@ async function ranking() {
     </div>
   `;
 
-  if (!dados.length) {
+  if (dados.length === 0) {
     html += `<div class="card"><p>Nenhum dado encontrado.</p></div>`;
   }
 
@@ -482,7 +546,7 @@ async function ranking() {
     html += `
       <div class="card">
         <h3>${index + 1}º ${item.nome}</h3>
-        <p><strong>Total:</strong> R$ ${item.total}</p>
+        <p><strong>Total:</strong> R$ ${Number(item.total || 0).toFixed(2)}</p>
       </div>
     `;
   });
@@ -495,14 +559,19 @@ async function ranking() {
 ========================= */
 
 async function carregarAdmin() {
-  const resBarbers = await fetch("/barbers");
-  const barbers = await resBarbers.json();
+  const barbers = await fetchJson("/barbers");
+  const services = await fetchJson("/services");
+  const products = await fetchJson("/products");
 
-  const resServices = await fetch("/services");
-  const services = await resServices.json();
-
-  const resProducts = await fetch("/products");
-  const products = await resProducts.json();
+  if (!Array.isArray(barbers) || !Array.isArray(services) || !Array.isArray(products)) {
+    document.getElementById("conteudo").innerHTML = `
+      <div class="card">
+        <h2>Erro ao carregar administrador</h2>
+        <p>Não foi possível carregar os dados.</p>
+      </div>
+    `;
+    return;
+  }
 
   let html = `
     <div class="card destaque">
@@ -530,7 +599,7 @@ async function carregarAdmin() {
   services.forEach((s) => {
     html += `
       <div class="linha-admin">
-        <span>${s.nome} - R$ ${s.preco}</span>
+        <span>${s.nome} - R$ ${Number(s.preco || 0).toFixed(2)}</span>
         <button class="btn-excluir" onclick="deletarServico('${s._id}')">Excluir</button>
       </div>
     `;
@@ -541,7 +610,7 @@ async function carregarAdmin() {
   products.forEach((p) => {
     html += `
       <div class="linha-admin">
-        <span>${p.nome} - R$ ${p.preco}</span>
+        <span>${p.nome} - R$ ${Number(p.preco || 0).toFixed(2)}</span>
         <button class="btn-excluir" onclick="deletarProduto('${p._id}')">Excluir</button>
       </div>
     `;
@@ -562,7 +631,7 @@ async function cadastrarBarbeiro() {
 
   if (!nome || !comissao) return;
 
-  await fetch("/barbers", {
+  const data = await fetchJson("/barbers", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -572,6 +641,11 @@ async function cadastrarBarbeiro() {
       comissao,
     }),
   });
+
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
 
   alert("Barbeiro cadastrado com sucesso");
   carregarAdmin();
@@ -583,7 +657,7 @@ async function cadastrarServico() {
 
   if (!nome || !preco) return;
 
-  await fetch("/services", {
+  const data = await fetchJson("/services", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -593,6 +667,11 @@ async function cadastrarServico() {
       preco,
     }),
   });
+
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
 
   alert("Serviço cadastrado com sucesso");
   carregarAdmin();
@@ -604,7 +683,7 @@ async function cadastrarProduto() {
 
   if (!nome || !preco) return;
 
-  await fetch("/products", {
+  const data = await fetchJson("/products", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -615,6 +694,11 @@ async function cadastrarProduto() {
     }),
   });
 
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
+
   alert("Produto cadastrado com sucesso");
   carregarAdmin();
 }
@@ -624,16 +708,28 @@ async function cadastrarProduto() {
 ========================= */
 
 async function deletarBarbeiro(id) {
-  await fetch(`/barbers/${id}`, { method: "DELETE" });
+  const data = await fetchJson(`/barbers/${id}`, { method: "DELETE" });
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
   carregarAdmin();
 }
 
 async function deletarServico(id) {
-  await fetch(`/services/${id}`, { method: "DELETE" });
+  const data = await fetchJson(`/services/${id}`, { method: "DELETE" });
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
   carregarAdmin();
 }
 
 async function deletarProduto(id) {
-  await fetch(`/products/${id}`, { method: "DELETE" });
+  const data = await fetchJson(`/products/${id}`, { method: "DELETE" });
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
   carregarAdmin();
 }
