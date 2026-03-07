@@ -1,3 +1,4 @@
+console.log("SCRIPT CARREGADO");
 function abrir(pagina) {
   if (pagina === "vendas") carregarVendas();
   if (pagina === "relatorio") carregarRelatorio();
