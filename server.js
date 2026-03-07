@@ -20,7 +20,7 @@ dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static("public"));
 
 mongoose
   .connect(process.env.MONGO_URI)
@@ -32,7 +32,7 @@ mongoose
 ====================== */
 
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.sendFile(path.resolve(__dirname, "public", "index.html"));
 });
 
 /* ======================
