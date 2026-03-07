@@ -1,31 +1,50 @@
+const path = require("path");
 require("dotenv").config();
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dns = require("dns");
-const ADMIN_PASSWORD = "123456";
-
-dns.setDefaultResultOrder("ipv4first");
-dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 const app = express();
-
-app.use(cors());
-app.use(express.json());
-app.use(express.static("public"));
 
 const Barber = require("./models/Barber");
 const Service = require("./models/Service");
 const Product = require("./models/Product");
 const Sale = require("./models/Sale");
 
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
+dns.setDefaultResultOrder("ipv4first");
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB conectado"))
   .catch((err) => console.log("Erro MongoDB:", err));
 
+/* ======================
+   ROTA INICIAL
+====================== */
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+/* ======================
+   STATUS
+====================== */
+
 app.get("/status", (req, res) => {
-  res.send("Sistema Barbearia funcionando");
+  res.json({
+    status: "online",
+    message: "Sistema da barbearia funcionando",
+    time: new Date(),
+  });
 });
 
 /* ======================
@@ -157,6 +176,7 @@ app.post("/sales", async (req, res) => {
     }
 
     const serviceDoc = await Service.findById(service);
+
     if (!serviceDoc) {
       return res.status(404).json({ error: "Serviço não encontrado" });
     }
@@ -166,6 +186,7 @@ app.post("/sales", async (req, res) => {
 
     if (product) {
       const productDoc = await Product.findById(product);
+
       if (productDoc) {
         products.push(productDoc._id);
         total += Number(productDoc.preco) || 0;
@@ -203,12 +224,13 @@ app.get("/sales", async (req, res) => {
     const { barber, date } = req.query;
     const filtro = {};
 
-    if (barber) filtro.barber = barber;
+    if (barber) {
+      filtro.barber = barber;
+    }
 
     if (date) {
-      const inicio = new Date(date);
-      const fim = new Date(date);
-      fim.setHours(23, 59, 59, 999);
+      const inicio = new Date(date + "T00:00:00");
+      const fim = new Date(date + "T23:59:59.999");
 
       filtro.date = {
         $gte: inicio,
@@ -242,8 +264,13 @@ app.get("/relatorio", async (req, res) => {
     }
 
     if (startDate || endDate) {
-      const inicio = startDate ? new Date(startDate + "T00:00:00") : new Date("2000-01-01T00:00:00");
-      const fim = endDate ? new Date(endDate + "T23:59:59.999") : new Date();
+      const inicio = startDate
+        ? new Date(startDate + "T00:00:00")
+        : new Date("2000-01-01T00:00:00");
+
+      const fim = endDate
+        ? new Date(endDate + "T23:59:59.999")
+        : new Date();
 
       filtro.date = {
         $gte: inicio,
@@ -276,7 +303,6 @@ app.get("/relatorio", async (req, res) => {
     res.json({
       total,
       vendas,
-      filtroRecebido: { barber, startDate, endDate }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -284,7 +310,7 @@ app.get("/relatorio", async (req, res) => {
 });
 
 /* ======================
-   RELATÓRIO BARBEIROS
+   RELATÓRIO DOS BARBEIROS
 ====================== */
 
 app.get("/relatorio-barbeiros", async (req, res) => {
@@ -351,6 +377,7 @@ app.get("/relatorio-barbeiros", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 /* ======================
    DASHBOARD DO DIA
 ====================== */
@@ -359,9 +386,8 @@ app.get("/daily-report", async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().slice(0, 10);
 
-    const inicio = new Date(date);
-    const fim = new Date(date);
-    fim.setHours(23, 59, 59, 999);
+    const inicio = new Date(date + "T00:00:00");
+    const fim = new Date(date + "T23:59:59.999");
 
     const sales = await Sale.find({
       date: {
@@ -416,9 +442,8 @@ app.get("/ranking", async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().slice(0, 10);
 
-    const inicio = new Date(date);
-    const fim = new Date(date);
-    fim.setHours(23, 59, 59, 999);
+    const inicio = new Date(date + "T00:00:00");
+    const fim = new Date(date + "T23:59:59.999");
 
     const sales = await Sale.find({
       date: {
@@ -434,7 +459,9 @@ app.get("/ranking", async (req, res) => {
 
       const nome = sale.barber.nome;
 
-      if (!ranking[nome]) ranking[nome] = 0;
+      if (!ranking[nome]) {
+        ranking[nome] = 0;
+      }
 
       ranking[nome] += Number(sale.total || 0);
     });
@@ -447,20 +474,6 @@ app.get("/ranking", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
-
-app.get("/status", (req, res) => {
-  res.json({
-    status: "online",
-    message: "Sistema da barbearia funcionando",
-    time: new Date(),
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
 });
 
 /* ======================
@@ -485,4 +498,14 @@ app.delete("/sales/:id", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/* ======================
+   SERVIDOR
+====================== */
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
