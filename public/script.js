@@ -1,108 +1,183 @@
-let token = null;
+let token = localStorage.getItem("token") || null;
 let usuario = null;
 let shops = [];
-let shopSelecionada = "";
+let shopSelecionada = localStorage.getItem("shopSelecionada") || "";
 
 let vendaAtual = {
   barber: "",
   services: [],
   products: [],
-  paymentMethod: ""
+  paymentMethod: "",
 };
 
-async function login() {
-  try {
-    const loginValue = document.getElementById("login").value;
-    const senhaValue = document.getElementById("senha").value;
+function salvarSessao() {
+  if (token) {
+    localStorage.setItem("token", token);
+  } else {
+    localStorage.removeItem("token");
+  }
 
-    const res = await fetch("/auth/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        login: loginValue,
-        senha: senhaValue,
-      }),
-    });
+  if (usuario) {
+    localStorage.setItem("usuario", JSON.stringify(usuario));
+  } else {
+    localStorage.removeItem("usuario");
+  }
 
-    const data = await res.json();
-
-    if (data.error) {
-      alert(data.error);
-      return;
-    }
-
-    token = data.token;
-    usuario = data.usuario;
-
-    const shopsRes = await fetch("/shops", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    shops = await shopsRes.json();
-
-    if (usuario.papel === "manager" && usuario.shop) {
-      shopSelecionada = usuario.shop.id;
-    }
-
-    document.getElementById("loginTela").style.display = "none";
-    document.getElementById("app").style.display = "block";
-
-    const btnAdmin = document.getElementById("btnAdmin");
-    const btnRelatorioBarbeiros = document.getElementById("btnRelatorioBarbeiros");
-
-    if (usuario.papel === "owner") {
-      if (btnAdmin) btnAdmin.style.display = "inline-block";
-      if (btnRelatorioBarbeiros) btnRelatorioBarbeiros.style.display = "inline-block";
-    } else {
-      if (btnAdmin) btnAdmin.style.display = "none";
-      if (btnRelatorioBarbeiros) btnRelatorioBarbeiros.style.display = "none";
-    }
-
-    await dashboard();
-  } catch (error) {
-    console.error("Erro no login:", error);
-    alert("Erro ao entrar no sistema.");
+  if (shopSelecionada) {
+    localStorage.setItem("shopSelecionada", shopSelecionada);
+  } else {
+    localStorage.removeItem("shopSelecionada");
   }
 }
 
-function montarSeletorShop() {
-  if (!usuario || usuario.papel !== "owner") return "";
-
-  return `
-    <div class="card">
-      <h3>Selecionar Barbearia</h3>
-      <select id="shopSelect" onchange="trocarShop()">
-        <option value="">Selecione a barbearia</option>
-        ${shops
-          .map(
-            (s) =>
-              `<option value="${s._id}" ${
-                shopSelecionada === s._id ? "selected" : ""
-              }>${s.nome}</option>`
-          )
-          .join("")}
-      </select>
-    </div>
-  `;
-}
-
-async function trocarShop() {
-  shopSelecionada = document.getElementById("shopSelect").value;
+function limparSessao() {
+  token = null;
+  usuario = null;
+  shops = [];
+  shopSelecionada = "";
   limparVenda();
 
-  if (!shopSelecionada) {
-    document.getElementById("conteudo").innerHTML = `
-      ${montarSeletorShop()}
-      <div class="card"><p>Selecione uma barbearia para continuar.</p></div>
-    `;
+  localStorage.removeItem("token");
+  localStorage.removeItem("usuario");
+  localStorage.removeItem("shopSelecionada");
+}
+
+function mostrarLogin() {
+  const loginTela = document.getElementById("loginTela");
+  const app = document.getElementById("app");
+
+  if (loginTela) loginTela.style.display = "flex";
+  if (app) app.style.display = "none";
+}
+
+function mostrarApp() {
+  const loginTela = document.getElementById("loginTela");
+  const app = document.getElementById("app");
+
+  if (loginTela) loginTela.style.display = "none";
+  if (app) app.style.display = "block";
+}
+
+function atualizarBotoesPermissao() {
+  const btnAdmin = document.getElementById("btnAdmin");
+  const btnRelatorioBarbeiros = document.getElementById("btnRelatorioBarbeiros");
+
+  if (!usuario) {
+    if (btnAdmin) btnAdmin.style.display = "none";
+    if (btnRelatorioBarbeiros) btnRelatorioBarbeiros.style.display = "none";
     return;
   }
 
-  await dashboard();
+  if (usuario.papel === "owner") {
+    if (btnAdmin) btnAdmin.style.display = "inline-block";
+    if (btnRelatorioBarbeiros) btnRelatorioBarbeiros.style.display = "inline-block";
+  } else {
+    if (btnAdmin) btnAdmin.style.display = "none";
+    if (btnRelatorioBarbeiros) btnRelatorioBarbeiros.style.display = "none";
+  }
+}
+
+function adicionarBotaoSair() {
+  const menu = document.querySelector(".menu");
+  if (!menu) return;
+
+  let btnSair = document.getElementById("btnSair");
+
+  if (!btnSair) {
+    btnSair = document.createElement("button");
+    btnSair.id = "btnSair";
+    btnSair.className = "btn-secundario";
+    btnSair.textContent = "Sair";
+    btnSair.onclick = logout;
+    menu.appendChild(btnSair);
+  }
+}
+
+function removerBotaoSair() {
+  const btnSair = document.getElementById("btnSair");
+  if (btnSair) btnSair.remove();
+}
+
+function setLoadingLogin(ativo) {
+  const botao = document.querySelector("#loginTela button");
+  const loginInput = document.getElementById("login");
+  const senhaInput = document.getElementById("senha");
+
+  if (botao) {
+    botao.disabled = ativo;
+    botao.textContent = ativo ? "Entrando..." : "Entrar";
+  }
+
+  if (loginInput) loginInput.disabled = ativo;
+  if (senhaInput) senhaInput.disabled = ativo;
+}
+
+function escapeHtml(texto) {
+  return String(texto)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+async function parseResponse(res) {
+  const text = await res.text();
+
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {
+      error: "Resposta inválida do servidor.",
+      raw: text,
+    };
+  }
+}
+
+async function fetchAuth(url, options = {}) {
+  if (!token) {
+    mostrarLogin();
+    return { error: "Sessão expirada. Faça login novamente." };
+  }
+
+  const config = {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`,
+    },
+  };
+
+  try {
+    const res = await fetch(url, config);
+    const data = await parseResponse(res);
+
+    if (res.status === 401) {
+      limparSessao();
+      mostrarLogin();
+      removerBotaoSair();
+      alert("Sua sessão expirou. Faça login novamente.");
+      return { error: "Sessão expirada." };
+    }
+
+    if (!res.ok && !data.error) {
+      return { error: `Erro ${res.status} ao acessar o servidor.` };
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Erro na requisição:", error);
+    return { error: "Erro de conexão com o servidor." };
+  }
+}
+
+function limparVenda() {
+  vendaAtual = {
+    barber: "",
+    services: [],
+    products: [],
+    paymentMethod: "",
+  };
 }
 
 function getShopQuery() {
@@ -119,17 +194,121 @@ function getShopParam(prefix = "&") {
   return "";
 }
 
-async function fetchAuth(url, options = {}) {
-  const config = {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      Authorization: `Bearer ${token}`,
-    },
-  };
+function montarSeletorShop() {
+  if (!usuario || usuario.papel !== "owner") return "";
 
-  const res = await fetch(url, config);
-  return res.json();
+  return `
+    <div class="card">
+      <h3>Selecionar Barbearia</h3>
+      <select id="shopSelect" onchange="trocarShop()">
+        <option value="">Selecione a barbearia</option>
+        ${shops
+          .map(
+            (s) =>
+              `<option value="${s._id}" ${
+                shopSelecionada === s._id ? "selected" : ""
+              }>${escapeHtml(s.nome)}</option>`
+          )
+          .join("")}
+      </select>
+    </div>
+  `;
+}
+
+async function trocarShop() {
+  const select = document.getElementById("shopSelect");
+  shopSelecionada = select ? select.value : "";
+  salvarSessao();
+  limparVenda();
+
+  if (!shopSelecionada) {
+    document.getElementById("conteudo").innerHTML = `
+      ${montarSeletorShop()}
+      <div class="card"><p>Selecione uma barbearia para continuar.</p></div>
+    `;
+    return;
+  }
+
+  await dashboard();
+}
+
+async function carregarShops() {
+  const shopsRes = await fetchAuth("/shops");
+  shops = Array.isArray(shopsRes) ? shopsRes : [];
+
+  if (usuario?.papel === "manager" && usuario?.shop) {
+    shopSelecionada = usuario.shop.id || usuario.shop._id || "";
+  }
+
+  salvarSessao();
+}
+
+async function login() {
+  const loginInput = document.getElementById("login");
+  const senhaInput = document.getElementById("senha");
+
+  const loginValue = loginInput?.value?.trim();
+  const senhaValue = senhaInput?.value?.trim();
+
+  if (!loginValue || !senhaValue) {
+    alert("Preencha usuário e senha.");
+    return;
+  }
+
+  setLoadingLogin(true);
+
+  try {
+    const res = await fetch("/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        login: loginValue,
+        senha: senhaValue,
+      }),
+    });
+
+    const data = await parseResponse(res);
+
+    if (!res.ok || data.error) {
+      alert(data.error || "Erro ao entrar no sistema.");
+      return;
+    }
+
+    token = data.token;
+    usuario = data.usuario;
+
+    salvarSessao();
+    await carregarShops();
+
+    mostrarApp();
+    atualizarBotoesPermissao();
+    adicionarBotaoSair();
+
+    await dashboard();
+  } catch (error) {
+    console.error("Erro no login:", error);
+    alert("Erro ao entrar no sistema.");
+  } finally {
+    setLoadingLogin(false);
+  }
+}
+
+function logout() {
+  limparSessao();
+  removerBotaoSair();
+  mostrarLogin();
+  atualizarBotoesPermissao();
+
+  const conteudo = document.getElementById("conteudo");
+  if (conteudo) conteudo.innerHTML = "";
+
+  const loginInput = document.getElementById("login");
+  const senhaInput = document.getElementById("senha");
+
+  if (loginInput) loginInput.value = "";
+  if (senhaInput) senhaInput.value = "";
 }
 
 function abrir(pagina) {
@@ -168,7 +347,7 @@ async function vendas() {
     return;
   }
 
-  let html = `
+  const html = `
     ${montarSeletorShop()}
     <div class="card">
       <h2>Registrar Venda</h2>
@@ -181,7 +360,7 @@ async function vendas() {
             ${barbers
               .map(
                 (b) =>
-                  `<option value="${b._id}" ${vendaAtual.barber === b._id ? "selected" : ""}>${b.nome}</option>`
+                  `<option value="${b._id}" ${vendaAtual.barber === b._id ? "selected" : ""}>${escapeHtml(b.nome)}</option>`
               )
               .join("")}
           </select>
@@ -194,7 +373,7 @@ async function vendas() {
                 (s) =>
                   `<option value="${s._id}" data-nome="${escapeHtml(
                     s.nome
-                  )}" data-preco="${Number(s.preco || 0)}">${s.nome} - R$ ${Number(
+                  )}" data-preco="${Number(s.preco || 0)}">${escapeHtml(s.nome)} - R$ ${Number(
                     s.preco || 0
                   ).toFixed(2)}</option>`
               )
@@ -211,7 +390,7 @@ async function vendas() {
                 (p) =>
                   `<option value="${p._id}" data-nome="${escapeHtml(
                     p.nome
-                  )}" data-preco="${Number(p.preco || 0)}">${p.nome} - R$ ${Number(
+                  )}" data-preco="${Number(p.preco || 0)}">${escapeHtml(p.nome)} - R$ ${Number(
                     p.preco || 0
                   ).toFixed(2)}</option>`
               )
@@ -241,7 +420,7 @@ async function vendas() {
                       .map(
                         (s, index) => `
                           <div class="item-resumo">
-                            <span>${s.nome} ${s.quantidade > 1 ? `(x${s.quantidade})` : ""}</span>
+                            <span>${escapeHtml(s.nome)} ${s.quantidade > 1 ? `(x${s.quantidade})` : ""}</span>
                             <span>
                               R$ ${(Number(s.preco) * Number(s.quantidade || 1)).toFixed(2)}
                               <button type="button" class="btn-secundario" onclick="diminuirServico(${index})">-</button>
@@ -264,7 +443,7 @@ async function vendas() {
                       .map(
                         (p, index) => `
                           <div class="item-resumo">
-                            <span>${p.nome} ${p.quantidade > 1 ? `(x${p.quantidade})` : ""}</span>
+                            <span>${escapeHtml(p.nome)} ${p.quantidade > 1 ? `(x${p.quantidade})` : ""}</span>
                             <span>
                               R$ ${(Number(p.preco) * Number(p.quantidade || 1)).toFixed(2)}
                               <button type="button" class="btn-secundario" onclick="diminuirProduto(${index})">-</button>
@@ -393,20 +572,13 @@ function calcularTotal() {
     (acc, item) => acc + Number(item.preco || 0) * Number(item.quantidade || 1),
     0
   );
+
   const totalProdutos = vendaAtual.products.reduce(
     (acc, item) => acc + Number(item.preco || 0) * Number(item.quantidade || 1),
     0
   );
-  return totalServicos + totalProdutos;
-}
 
-function limparVenda() {
-  vendaAtual = {
-    barber: "",
-    services: [],
-    products: [],
-    paymentMethod: ""
-  };
+  return totalServicos + totalProdutos;
 }
 
 async function salvarVenda() {
@@ -495,7 +667,7 @@ async function relatorio() {
 
   const hoje = new Date().toISOString().slice(0, 10);
 
-  let html = `
+  const html = `
     ${montarSeletorShop()}
     <div class="card">
       <h2>Relatório de Vendas</h2>
@@ -513,7 +685,7 @@ async function relatorio() {
           <label>Barbeiro</label>
           <select id="barbeiroFiltro">
             <option value="">Todos</option>
-            ${barbers.map((b) => `<option value="${b._id}">${b.nome}</option>`).join("")}
+            ${barbers.map((b) => `<option value="${b._id}">${escapeHtml(b.nome)}</option>`).join("")}
           </select>
         </div>
       </div>
@@ -556,10 +728,10 @@ async function buscarRelatorio() {
     dados.vendas.forEach((v) => {
       html += `
         <div class="card">
-          <p><strong>Barbeiro:</strong> ${v.barbeiro}</p>
-          <p><strong>Serviços:</strong> ${(v.servicos || []).join(", ") || "Nenhum"}</p>
-          <p><strong>Produtos:</strong> ${(v.produtos || []).join(", ") || "Nenhum"}</p>
-          <p><strong>Pagamento:</strong> ${v.pagamento}</p>
+          <p><strong>Barbeiro:</strong> ${escapeHtml(v.barbeiro || "")}</p>
+          <p><strong>Serviços:</strong> ${Array.isArray(v.servicos) && v.servicos.length ? v.servicos.map(escapeHtml).join(", ") : "Nenhum"}</p>
+          <p><strong>Produtos:</strong> ${Array.isArray(v.produtos) && v.produtos.length ? v.produtos.map(escapeHtml).join(", ") : "Nenhum"}</p>
+          <p><strong>Pagamento:</strong> ${escapeHtml(v.pagamento || "")}</p>
           <p><strong>Valor:</strong> R$ ${Number(v.valor || 0).toFixed(2)}</p>
           <p><strong>Data:</strong> ${new Date(v.data).toLocaleString("pt-BR")}</p>
           ${
@@ -616,7 +788,7 @@ async function relatorioBarbeiros() {
   const barbers = await fetchAuth(`/barbers${query}`);
   const hoje = new Date().toISOString().slice(0, 10);
 
-  let html = `
+  const html = `
     ${montarSeletorShop()}
     <div class="card">
       <h2>Relatório dos Barbeiros</h2>
@@ -634,7 +806,7 @@ async function relatorioBarbeiros() {
           <label>Barbeiro</label>
           <select id="barbeiroFiltroRelatorio">
             <option value="">Todos</option>
-            ${(barbers || []).map((b) => `<option value="${b._id}">${b.nome}</option>`).join("")}
+            ${(barbers || []).map((b) => `<option value="${b._id}">${escapeHtml(b.nome)}</option>`).join("")}
           </select>
         </div>
       </div>
@@ -677,7 +849,7 @@ async function buscarRelatorioBarbeiros() {
     dados.barbeiros.forEach((b) => {
       html += `
         <div class="card">
-          <h3>${b.barbeiro}</h3>
+          <h3>${escapeHtml(b.barbeiro || "")}</h3>
           <p><strong>Total do período:</strong> R$ ${Number(b.totalPeriodo || 0).toFixed(2)}</p>
           <p><strong>Comissão:</strong> R$ ${Number(b.comissaoPeriodo || 0).toFixed(2)}</p>
           <p><strong>Produtos vendidos:</strong> ${Number(b.produtosVendidos || 0)}</p>
@@ -686,7 +858,7 @@ async function buscarRelatorioBarbeiros() {
             ${
               Array.isArray(b.servicosDetalhados) && b.servicosDetalhados.length > 0
                 ? b.servicosDetalhados
-                    .map((s) => `<p>${s.quantidade} ${s.nome}</p>`)
+                    .map((s) => `<p>${Number(s.quantidade || 0)} ${escapeHtml(s.nome || "")}</p>`)
                     .join("")
                 : "<p>Nenhum serviço.</p>"
             }
@@ -706,7 +878,7 @@ async function buscarRelatorioBarbeiros() {
           ${
             Array.isArray(dia.servicosDetalhados) && dia.servicosDetalhados.length > 0
               ? dia.servicosDetalhados
-                  .map((s) => `<p>${s.quantidade} ${s.nome}</p>`)
+                  .map((s) => `<p>${Number(s.quantidade || 0)} ${escapeHtml(s.nome || "")}</p>`)
                   .join("")
               : "<p>Nenhum serviço.</p>"
           }
@@ -892,7 +1064,7 @@ async function buscarRanking() {
     dados.forEach((item, index) => {
       html += `
         <div class="card">
-          <h3>${index + 1}º ${item.nome}</h3>
+          <h3>${index + 1}º ${escapeHtml(item.nome || "")}</h3>
           <p>R$ ${Number(item.total || 0).toFixed(2)}</p>
         </div>
       `;
@@ -928,7 +1100,7 @@ async function admin() {
   const services = await fetchAuth(`/services${query}`);
   const products = await fetchAuth(`/products${query}`);
 
-  let html = `
+  const html = `
     ${montarSeletorShop()}
 
     <div class="card">
@@ -946,7 +1118,7 @@ async function admin() {
         .map(
           (b) => `
             <div class="item-resumo">
-              <span>${b.nome} - ${b.comissao}%</span>
+              <span>${escapeHtml(b.nome)} - ${Number(b.comissao || 0)}%</span>
               <button class="btn-secundario" onclick="apagarBarbeiro('${b._id}')">Apagar</button>
             </div>
           `
@@ -961,7 +1133,7 @@ async function admin() {
         .map(
           (s) => `
             <div class="item-resumo">
-              <span>${s.nome} - R$ ${Number(s.preco || 0).toFixed(2)}</span>
+              <span>${escapeHtml(s.nome)} - R$ ${Number(s.preco || 0).toFixed(2)}</span>
               <button class="btn-secundario" onclick="apagarServico('${s._id}')">Apagar</button>
             </div>
           `
@@ -976,7 +1148,7 @@ async function admin() {
         .map(
           (p) => `
             <div class="item-resumo">
-              <span>${p.nome} - R$ ${Number(p.preco || 0).toFixed(2)}</span>
+              <span>${escapeHtml(p.nome)} - R$ ${Number(p.preco || 0).toFixed(2)}</span>
               <button class="btn-secundario" onclick="apagarProduto('${p._id}')">Apagar</button>
             </div>
           `
@@ -1071,7 +1243,7 @@ async function apagarBarbeiro(id) {
   if (!confirmar) return;
 
   const data = await fetchAuth(`/barbers/${id}`, {
-    method: "DELETE"
+    method: "DELETE",
   });
 
   if (data.error) {
@@ -1080,7 +1252,7 @@ async function apagarBarbeiro(id) {
   }
 
   alert("Barbeiro apagado");
-  admin();
+  await admin();
 }
 
 async function apagarServico(id) {
@@ -1088,7 +1260,7 @@ async function apagarServico(id) {
   if (!confirmar) return;
 
   const data = await fetchAuth(`/services/${id}`, {
-    method: "DELETE"
+    method: "DELETE",
   });
 
   if (data.error) {
@@ -1097,7 +1269,7 @@ async function apagarServico(id) {
   }
 
   alert("Serviço apagado");
-  admin();
+  await admin();
 }
 
 async function apagarProduto(id) {
@@ -1105,7 +1277,7 @@ async function apagarProduto(id) {
   if (!confirmar) return;
 
   const data = await fetchAuth(`/products/${id}`, {
-    method: "DELETE"
+    method: "DELETE",
   });
 
   if (data.error) {
@@ -1114,18 +1286,58 @@ async function apagarProduto(id) {
   }
 
   alert("Produto apagado");
-  admin();
+  await admin();
 }
 
 /* =========================
-   UTIL
+   INICIALIZAÇÃO
 ========================= */
 
-function escapeHtml(texto) {
-  return String(texto)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+document.addEventListener("DOMContentLoaded", async () => {
+  const usuarioSalvo = localStorage.getItem("usuario");
+
+  if (usuarioSalvo) {
+    try {
+      usuario = JSON.parse(usuarioSalvo);
+    } catch {
+      usuario = null;
+    }
+  }
+
+  const loginInput = document.getElementById("login");
+  const senhaInput = document.getElementById("senha");
+
+  [loginInput, senhaInput].forEach((campo) => {
+    if (!campo) return;
+
+    campo.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        login();
+      }
+    });
+  });
+
+  if (token && usuario) {
+    await carregarShops();
+    mostrarApp();
+    atualizarBotoesPermissao();
+    adicionarBotaoSair();
+    await dashboard();
+  } else {
+    mostrarLogin();
+    atualizarBotoesPermissao();
+  }
+});
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/service-worker.js")
+      .then(() => {
+        console.log("Service Worker registrado com sucesso");
+      })
+      .catch((error) => {
+        console.log("Erro ao registrar Service Worker:", error);
+      });
+  });
 }

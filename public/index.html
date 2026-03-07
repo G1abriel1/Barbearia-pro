@@ -1,93 +1,54 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Barbearia Contorno</title>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barbearia contorno</title>
+  <link rel="stylesheet" href="style.css">
 <link rel="manifest" href="/manifest.json">
-
-<meta name="theme-color" content="#d4af37">
+<meta name="theme-color" content="#0f0f0f">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="Barbearia">
-
-<link rel="stylesheet" href="style.css">
-
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
-
 <body>
 
-<!-- LOGIN -->
+  <!-- LOGIN -->
+  <div id="loginTela" class="login">
+  <div class="login-box">
+    <img src="/logo.png" class="logo-login" alt="Logo Barbearia Contorno">
+    <h2>Acesso ao sistema</h2>
+    <p>Entre para acessar o sistema da barbearia</p>
 
-<div id="loginTela" class="login-container">
+    <input id="login" type="text" placeholder="Usuário" autocomplete="username">
+    <input id="senha" type="password" placeholder="Senha" autocomplete="current-password">
 
-<img src="/logo.png" class="logo-login">
-
-<h2>Acesso ao sistema</h2>
-
-<input id="login" placeholder="Usuário">
-
-<input id="senha" type="password" placeholder="Senha">
-
-<button onclick="login()">Entrar</button>
-
+    <button onclick="login()">Entrar</button>
+  </div>
 </div>
 
-<!-- APP -->
+  <!-- APP -->
+  <div id="app" style="display:none;">
+    <header>
+      <nav class="menu">
+        <button onclick="abrir('vendas')">Vendas</button>
+        <button onclick="abrir('relatorio')">Relatório</button>
 
-<div id="app" style="display:none;">
+        <button id="btnRelatorioBarbeiros" onclick="abrir('relatorioBarbeiros')" style="display:none">
+          Relatório dos Barbeiros
+        </button>
 
-<header>
+        <button onclick="abrir('dashboard')">Dashboard</button>
+        <button onclick="abrir('ranking')">Ranking</button>
 
-<img src="/logo.png" class="logo-topo">
+        <button id="btnAdmin" onclick="abrir('admin')" style="display:none">
+          Administrador
+        </button>
+      </nav>
+    </header>
 
-<nav class="menu">
+    <main id="conteudo"></main>
+  </div>
 
-<button onclick="abrir('vendas')">Vendas</button>
-
-<button onclick="abrir('relatorio')">Relatório</button>
-
-<button id="btnRelatorioBarbeiros" onclick="abrir('relatorioBarbeiros')" style="display:none">
-Relatório dos Barbeiros
-</button>
-
-<button onclick="abrir('dashboard')">Dashboard</button>
-
-<button onclick="abrir('ranking')">Ranking</button>
-
-<button id="btnAdmin" onclick="abrir('admin')" style="display:none">
-Administrador
-</button>
-
-</nav>
-
-</header>
-
-<main id="conteudo"></main>
-
-</div>
-
-<script src="script.js"></script>
-
-<script>
-
-if ("serviceWorker" in navigator) {
-
-window.addEventListener("load", () => {
-
-navigator.serviceWorker
-.register("/service-worker.js")
-.then(() => console.log("Service Worker registrado"))
-.catch(err => console.log("Erro no service worker", err));
-
-});
-
-}
-
-</script>
-
+  <script src="script.js"></script>
 </body>
 </html>
