@@ -1,5 +1,6 @@
 const path = require("path");
 require("dotenv").config();
+require("./backup");
 
 const express = require("express");
 const mongoose = require("mongoose");
