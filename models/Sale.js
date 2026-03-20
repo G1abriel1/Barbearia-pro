@@ -34,6 +34,13 @@ const SaleSchema = new mongoose.Schema(
       required: true,
       default: 0,
     },
+
+    // ✅ AQUI FOI ADICIONADO CORRETAMENTE
+    gorjeta: {
+      type: Number,
+      default: 0,
+    },
+
     criadoPor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -427,7 +427,7 @@ app.delete("/products/:id", auth, somenteOwner, async (req, res) => {
 
 app.post("/sales", auth, ownerOuManager, async (req, res) => {
   try {
-    const { barber, services, products, paymentMethod, observacoes, shop } = req.body;
+    const { barber, services, products, paymentMethod, observacoes, shop, gorjeta } = req.body;
 
     const shopId = req.user.papel === "owner" ? shop : (req.user.shop?._id || req.user.shop);
 
@@ -503,18 +503,20 @@ app.post("/sales", auth, ownerOuManager, async (req, res) => {
     }, 0);
 
     const total = totalServicos + totalProdutos;
+    const valorGorjeta = Number(gorjeta || 0);
 
     const sale = new Sale({
-      shop: shopId,
-      barber,
-      services: listaServicos,
-      products: listaProdutos,
-      paymentMethod,
-      total,
-      criadoPor: req.user._id,
-      observacoes: observacoes || "",
-      date: new Date(),
-    });
+  shop: shopId,
+  barber,
+  services: listaServicos,
+  products: listaProdutos,
+  paymentMethod,
+  total,
+  gorjeta: valorGorjeta,
+  criadoPor: req.user._id,
+  observacoes: observacoes || "",
+  date: new Date(),
+});
 
     await sale.save();
 
