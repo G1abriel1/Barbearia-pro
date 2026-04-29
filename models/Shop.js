@@ -8,12 +8,15 @@ const ShopSchema = new mongoose.Schema(
       trim: true,
       unique: true,
     },
+
     ativo: {
       type: Boolean,
       default: true,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
 module.exports = mongoose.model("Shop", ShopSchema);
